@@ -54,7 +54,6 @@ bool IsRequestValid(int status, SOCKET& personalSocket)
 	{
 		printf(SERVER_ERROR_MSG);
 
-		closesocket(personalSocket);
 		return false;
 	}
 
@@ -68,7 +67,6 @@ bool IsResponseValid(int status, SOCKET& personalSocket)
 	{
 		printf(SERVER_ERROR_MSG);
 
-		closesocket(personalSocket);
 		return false;
 	}
 
