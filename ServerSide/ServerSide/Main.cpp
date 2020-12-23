@@ -4,6 +4,7 @@
 #include <winsock2.h>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #pragma comment(lib,"Ws2_32.lib")
 using namespace std;
@@ -20,14 +21,19 @@ const char NEW_CLIENT_MSG[255] = "%d clients connected\n";
 const char SERVER_LISTENING_MSG[255] = "Server is listening for new connections\n";
 const char SERVER_GETLIST_INFO_MSG[255] = "Server sended players list to %s:%d\n";
 const char SERVER_GETYOUNGEST_INFO_MSG[255] = "Server sended youngest player to %s:%d\n";
+const char SERVER_DELETE_PLAYER_INFO_MSG[255] = "Server deleted player by request of %s:%d\n";
+const char SERVER_CREATE_PLAYER_INFO_MSG[255] = "Server created player by request of %s:%d\n";
+const char SERVER_EDIT_PLAYER_INFO_MSG[255] = "Server edited player by request of %s:%d\n";
 
 // NOTE: Logic msgs
 const char PLAYERS_LIST_HEADER[255] = "Players list: \n";
 const char YOUNGEST_PLAYER_HEADER[255] = "Youngest player: \n";
+const char OPERATION_COMPLETED_MSG[255] = "Operation was successfuly completed \n";
 
-
+// NOTE: Server constants
 #define LOCALHOST_PORT 8000
 
+// NOTE: Action constants
 #define GET_MENU_ACTION 0
 #define VIEW_PLAYERS_ACTION 49
 #define CREATE_PLAYER_ACTION 50
@@ -36,8 +42,11 @@ const char YOUNGEST_PLAYER_HEADER[255] = "Youngest player: \n";
 #define YOUNGEST_PLAYER_ACTION 53
 #define EXIT_ACTION 54
 
+// NOTE: Misc constants
+#define RESPONSE_BUFFER_LENGTH 2048
+#define INPUT_EXIT_CHARACTER '*'
 
-int playersCount = 0;
+// NOTE: Player entity
 struct Player
 {
 	int Id;
@@ -45,16 +54,23 @@ struct Player
 	int Age;
 	int Height;
 	int Weight;
-} players[255];
+};
+vector<Player> players;
 
+// NOTE: Helpler for sending connection info to the thread func
 struct ConnectionInfo
 {
 	SOCKET socket;
 	sockaddr_in addr;
 };
 
+// NOTE: Initial database (array) seeding
+int currentId = 0;
 void SeedDatabase()
 {
+	int playersCount = 0;
+
+	players.push_back(Player());
 	players[playersCount].Id = playersCount;
 	strcpy(players[playersCount].Fullname, "Trevon Park");
 	players[playersCount].Age = 20;
@@ -62,6 +78,7 @@ void SeedDatabase()
 	players[playersCount].Weight = 75;
 	playersCount++;
 
+	players.push_back(Player());
 	players[playersCount].Id = playersCount;
 	strcpy(players[playersCount].Fullname, "Alex Chan");
 	players[playersCount].Age = 22;
@@ -69,6 +86,7 @@ void SeedDatabase()
 	players[playersCount].Weight = 72;
 	playersCount++;
 
+	players.push_back(Player());
 	players[playersCount].Id = playersCount;
 	strcpy(players[playersCount].Fullname, "Albert Mixon");
 	players[playersCount].Age = 26;
@@ -76,6 +94,7 @@ void SeedDatabase()
 	players[playersCount].Weight = 80;
 	playersCount++;
 
+	players.push_back(Player());
 	players[playersCount].Id = playersCount;
 	strcpy(players[playersCount].Fullname, "Donald Hobbs");
 	players[playersCount].Age = 23;
@@ -83,14 +102,16 @@ void SeedDatabase()
 	players[playersCount].Weight = 76;
 	playersCount++;
 
+	players.push_back(Player());
 	players[playersCount].Id = playersCount;
 	strcpy(players[playersCount].Fullname, "Patrick Sorrels");
 	players[playersCount].Age = 21;
 	players[playersCount].Height = 182;
 	players[playersCount].Weight = 79;
-	playersCount++;
+	currentId = playersCount;
 }
 
+// NOTE: Validate request was successfully sent
 bool IsRequestValid(int status, int action, sockaddr_in addr)
 {
 	if (status == SOCKET_ERROR)
@@ -104,6 +125,7 @@ bool IsRequestValid(int status, int action, sockaddr_in addr)
 	return true;
 }
 
+// NOTE: Validate response was successfully received
 bool IsResponseValid(int status, int action, sockaddr_in addr)
 {
 	if (status < 0)
@@ -117,23 +139,25 @@ bool IsResponseValid(int status, int action, sockaddr_in addr)
 	return true;
 }
 
+// NOTE: View all players action handler
 void HandleViewPlayersAction(SOCKET socket, sockaddr_in addr)
 {
 	string output(PLAYERS_LIST_HEADER);
 
-	char responseBuffer[2048];
+	char responseBuffer[RESPONSE_BUFFER_LENGTH];
 
-	for (int i = 0; i < playersCount; i++)
+	for (int i = 0; i < players.size(); i++)
 	{
 		output.append("Id: ").append(to_string(players[i].Id)).append("\n");
 		output.append("Fullname: ").append(players[i].Fullname).append("\n");
 		output.append("Age: ").append(to_string(players[i].Age)).append("\n");
 		output.append("Height: ").append(to_string(players[i].Height)).append("\n");
-		output.append("Weight: ").append(to_string(players[i].Weight)).append("\n");
+		output.append("Weight: ").append(to_string(players[i].Weight)).append("\n\n");
 	}
 
 	strcpy_s(responseBuffer, output.c_str());
 
+	// NOTE: Log action
 	int responseSendingStatus = send(socket, responseBuffer, strlen(responseBuffer), 0);
 	if (IsRequestValid(responseSendingStatus, VIEW_PLAYERS_ACTION, addr))
 	{
@@ -141,28 +165,213 @@ void HandleViewPlayersAction(SOCKET socket, sockaddr_in addr)
 	}
 }
 
+// NOTE: Create new player action handler
 void HandleCreatePlayerAction(SOCKET socket, sockaddr_in addr)
 {
-	return;
+	char responseBuffer[RESPONSE_BUFFER_LENGTH];
+
+	// NOTE: Waiting for fullname
+	int response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, CREATE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+	char newPlayerFullname[255];
+	strcpy_s(newPlayerFullname, responseBuffer);
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+
+	// NOTE: Waiting for age
+	response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, CREATE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+	int newPlayerAge = atoi(responseBuffer);;
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+
+	// NOTE: Waiting for height
+	response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, CREATE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+	int newPlayerHeight = atoi(responseBuffer);;
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+
+	// NOTE: Waiting for weight
+	response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, CREATE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+	int newPlayerWeight = atoi(responseBuffer);
+
+	// NOTE: Creating player entity
+	Player newPlayer = Player();
+	newPlayer.Id = ++currentId;
+	strcpy(newPlayer.Fullname, newPlayerFullname);
+	newPlayer.Age = newPlayerAge;
+	newPlayer.Height = newPlayerHeight;
+	newPlayer.Weight = newPlayerWeight;
+
+	// NOTE: Adding to collection
+	players.push_back(newPlayer);
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+	strcpy_s(responseBuffer, OPERATION_COMPLETED_MSG);
+
+	// NOTE: Log action
+	int responseSendingStatus = send(socket, responseBuffer, strlen(responseBuffer), 0);
+	if (IsRequestValid(responseSendingStatus, DELETE_PLAYER_ACTION, addr))
+	{
+		printf(SERVER_CREATE_PLAYER_INFO_MSG, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+	}
 }
 
+// NOTE: Edit played action handler
 void HandleEditPlayerAction(SOCKET socket, sockaddr_in addr)
 {
-	return;
+	// NOTE: Show all players to client
+	HandleViewPlayersAction(socket, addr);
+
+	char responseBuffer[RESPONSE_BUFFER_LENGTH];
+
+	// NOTE: Waiting for id
+	int response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, DELETE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+
+	if (strlen(responseBuffer) == 0 || responseBuffer[0] == INPUT_EXIT_CHARACTER)
+	{
+		return;
+	}
+
+	int id = atoi(responseBuffer);
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+
+	// NOTE: Waiting for fullname
+	response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, CREATE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+	char newPlayerFullname[255];
+	strcpy_s(newPlayerFullname, responseBuffer);
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+
+    
+	// NOTE: Waiting for age
+	response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, CREATE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+	int newPlayerAge = atoi(responseBuffer);;
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+
+	// NOTE: Waiting for height
+	response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, CREATE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+	int newPlayerHeight = atoi(responseBuffer);;
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+
+	// NOTE: Waiting for weight
+	response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, CREATE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+	int newPlayerWeight = atoi(responseBuffer);
+
+	// NOTE: Editing player entity
+	for (int i = 0; i < players.size(); i++)
+	{
+		if (players[i].Id == id)
+		{
+			strcpy_s(players[i].Fullname, newPlayerFullname);
+			players[i].Age = newPlayerAge;
+			players[i].Height = newPlayerHeight;
+			players[i].Weight = newPlayerWeight;
+			break;
+		}
+	}
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+	strcpy_s(responseBuffer, OPERATION_COMPLETED_MSG);
+
+	// NOTE: Log action
+	int responseSendingStatus = send(socket, responseBuffer, strlen(responseBuffer), 0);
+	if (IsRequestValid(responseSendingStatus, DELETE_PLAYER_ACTION, addr))
+	{
+		printf(SERVER_EDIT_PLAYER_INFO_MSG, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+	}
 }
 
+// NOTE: Delete player action handler
 void HandleDeletePlayerAction(SOCKET socket, sockaddr_in addr)
 {
-	return;
+	// NOTE: View all players to client
+	HandleViewPlayersAction(socket, addr);
+
+	char responseBuffer[RESPONSE_BUFFER_LENGTH];
+
+	// NOTE: Waiting for id
+	int response = recv(socket, responseBuffer, sizeof(responseBuffer), 0);
+	if (!IsResponseValid(response, DELETE_PLAYER_ACTION, addr))
+	{
+		return;
+	}
+	responseBuffer[response] = '\0';
+
+	if (strlen(responseBuffer) == 0 || responseBuffer[0] == INPUT_EXIT_CHARACTER)
+	{
+		return;
+	}
+
+	int id = atoi(responseBuffer);
+
+	// NOTE: Remove player for the array
+	players.erase(std::remove_if(players.begin(), players.end(), [&](Player const& player) {return player.Id == id;}), players.end());
+
+	memset(responseBuffer, 0, RESPONSE_BUFFER_LENGTH);
+	strcpy_s(responseBuffer, OPERATION_COMPLETED_MSG);
+
+	// NOTE: Log action
+	int responseSendingStatus = send(socket, responseBuffer, strlen(responseBuffer), 0);
+	if (IsRequestValid(responseSendingStatus, DELETE_PLAYER_ACTION, addr))
+	{
+		printf(SERVER_DELETE_PLAYER_INFO_MSG, inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+	}
 }
 
+// NOTE: Show youngest player action handler
 void HandleYoungestPlayerAction(SOCKET socket, sockaddr_in addr)
 {
 	string output(YOUNGEST_PLAYER_HEADER);
-	char responseBuffer[2048];
+	char responseBuffer[RESPONSE_BUFFER_LENGTH];
 	int youngestPlayerIndex = 0;
 
-	for (int i = 0; i < playersCount; i++)
+	for (int i = 0; i < players.size(); i++)
 	{
 		if (players[youngestPlayerIndex].Age > players[i].Age)
 		{
@@ -174,10 +383,11 @@ void HandleYoungestPlayerAction(SOCKET socket, sockaddr_in addr)
 	output.append("Fullname: ").append(players[youngestPlayerIndex].Fullname).append("\n");
 	output.append("Age: ").append(to_string(players[youngestPlayerIndex].Age)).append("\n");
 	output.append("Height: ").append(to_string(players[youngestPlayerIndex].Height)).append("\n");
-	output.append("Weight: ").append(to_string(players[youngestPlayerIndex].Weight)).append("\n");
+	output.append("Weight: ").append(to_string(players[youngestPlayerIndex].Weight)).append("\n\n");
 
 	strcpy_s(responseBuffer, output.c_str());
 
+	// NOTE: Log action
 	int responseSendingStatus = send(socket, responseBuffer, strlen(responseBuffer), 0);
 	if (IsRequestValid(responseSendingStatus, YOUNGEST_PLAYER_ACTION, addr))
 	{
@@ -185,6 +395,7 @@ void HandleYoungestPlayerAction(SOCKET socket, sockaddr_in addr)
 	}
 }
 
+// NOTE: Base handler for every client
 DWORD WINAPI ThreadFunc(LPVOID connectionInfo)
 {
 	ConnectionInfo connection = ((ConnectionInfo*)connectionInfo)[0];
@@ -197,6 +408,7 @@ DWORD WINAPI ThreadFunc(LPVOID connectionInfo)
 
 	while (true)
 	{
+		// NOTE: Waiting for menu choice
 		int responseResult = recv(personalSocket, responseBuffer, sizeof(responseBuffer), 0);
 		if (!IsResponseValid(responseResult, GET_MENU_ACTION, addr))
 		{
